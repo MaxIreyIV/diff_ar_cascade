@@ -1,4 +1,5 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
+from utils.generate import generate
 import torch
 import re
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -10,29 +11,29 @@ llada_model = (
     AutoModelForCausalLM.from_pretrained(llada_checkpoint, trust_remote_code=True).to(device).eval()
 )
 
-# Load Dream
-dream_checkpoint = "Dream-org/Dream-v0-Instruct-7B"
-dream_tokenizer = AutoTokenizer.from_pretrained(dream_checkpoint, trust_remote_code=True)
-dream_model = (
-    AutoModel.from_pretrained(
-        dream_checkpoint,
-        trust_remote_code=True
-    )
-    .to(device)
-    .eval()
-)
+# # Load Dream
+# dream_checkpoint = "Dream-org/Dream-v0-Instruct-7B"
+# dream_tokenizer = AutoTokenizer.from_pretrained(dream_checkpoint, trust_remote_code=True)
+# dream_model = (
+#     AutoModel.from_pretrained(
+#         dream_checkpoint,
+#         trust_remote_code=True
+#     )
+#     .to(device)
+#     .eval()
+# )
 
-# Load DeepSeek
-ds_checkpoint = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
-ds_tokenizer = AutoTokenizer.from_pretrained(
-    ds_checkpoint,
-    trust_remote_code=True,
-)
-ds_model = AutoModelForCausalLM.from_pretrained(
-    ds_checkpoint,
-    device_map="auto",
-    low_cpu_mem_usage=True
-)
+# # Load DeepSeek
+# ds_checkpoint = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+# ds_tokenizer = AutoTokenizer.from_pretrained(
+#     ds_checkpoint,
+#     trust_remote_code=True,
+# )
+# ds_model = AutoModelForCausalLM.from_pretrained(
+#     ds_checkpoint,
+#     device_map="auto",
+#     low_cpu_mem_usage=True
+# )
 
 # Prompt Builder
 def build_thought_prompt(question: str) -> str:
@@ -54,16 +55,14 @@ def build_thought_prompt(question: str) -> str:
 
 # Run Models
 def run_llada(question: str, max_new_tokens: int = 256) -> str:
-    inputs = llada_tokenizer(question, return_tensors="pt").to(device)
-    pad_id = llada_tokenizer.pad_token_id
+
+    m = [{"role": "user", "content": question},]
+    user_input = llada_tokenizer.apply_chat_template(m, add_generation_prompt=True, tokenize=False)
+    inputs = llada_tokenizer(user_input)['input_ids']
+    input_ids = torch.tensor(inputs).to(device).unsqueeze(0)
     llada_model.config.use_cache = False
-    output_ids = llada_model.generate(
-        **inputs,
-        max_new_tokens=max_new_tokens,
-        use_cache=False,
-        pad_token_id=pad_id,
-    )
-    return llada_tokenizer.decode(output_ids[0], skip_special_tokens=True)
+    out = generate(llada_model, input_ids, steps=128, gen_length=128, block_length=32, temperature=0., cfg_scale=0., remasking='low_confidence')
+    return llada_tokenizer.batch_decode(out[:, input_ids.shape[1]:], skip_special_tokens=True)[0]
 
 def run_dream(question: str, max_new_tokens: int = 256, steps: int = 512) -> str:
     prompt = build_thought_prompt(question)
