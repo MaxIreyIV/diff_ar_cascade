@@ -1,7 +1,7 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
 from utils.generate import generate
 import torch
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda:1" if torch.cuda.is_available() else "cpu"
 
 # Load Dream
 dream_checkpoint = "Dream-org/Dream-v0-Instruct-7B"
@@ -12,7 +12,7 @@ dream_model = (
         trust_remote_code=True,
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
-        device_map={"": 0}
+        device_map={"": 1}
     )
     .eval()
 )
@@ -25,9 +25,7 @@ ds_tokenizer = AutoTokenizer.from_pretrained(
 )
 ds_model = AutoModelForCausalLM.from_pretrained(
     ds_checkpoint,
-    torch_dtype=torch.float16,
-    low_cpu_mem_usage=True
-)
+    torch_dtype=torch.float16).to(device)
 
 # Run Dream
 def run_dream(question: str, max_new_tokens: int = 256, steps: int = 256) -> str:
@@ -63,18 +61,36 @@ def run_dream(question: str, max_new_tokens: int = 256, steps: int = 256) -> str
 
 def run_deepseek(prompt: str, max_new_tokens: int = 512) -> str:
     ds_model.eval()
-    inputs = ds_tokenizer(prompt, return_tensors="pt").to(ds_model.device)
-    output_ids = ds_model.generate(
-        **inputs,
-        max_new_tokens=max_new_tokens,
-        temperature=0.5,
+    messages = [
+        {"role": "user", "content": prompt}
+    ]
+    inputs = ds_tokenizer.apply_chat_template(messages,  
+                                tokenize=False,
+                                add_generation_prompt=True,
+                                enable_thinking=True)
+    model_inputs = ds_tokenizer([inputs], return_tensors="pt").to(ds_model.device)
+
+    generated_ids = ds_model.generate(
+             **model_inputs,
+        do_sample=True,          # ← stays
+        temperature=0.7,
+        top_p=0.9,
+
+        max_new_tokens=max_new_tokens,  # keep tight
         use_cache=True
     )
-    decoded = ds_tokenizer.decode(output_ids[0], skip_special_tokens=True)
-    result_text = decoded.strip()
-    if not result_text.endswith("\n"):
-        result_text += "\n"
-    return result_text
+    output_ids = generated_ids[0][len(model_inputs.input_ids[0]):].tolist() 
+    try:
+    # rindex finding 151668 (</think>)
+        index = len(output_ids) - output_ids[::-1].index(151668)
+    except ValueError:
+        index = 0
+
+    thinking_content = ds_tokenizer.decode(output_ids[:index], skip_special_tokens=True).strip("\n")
+    content = ds_tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip("\n")
+    return thinking_content, content
 
 question = "What is 2 + 2?"
-print(run_deepseek(question))
+rest = run_deepseek(question)
+print("thinking_content: ", rest[0])
+print("content: ", rest[1])
