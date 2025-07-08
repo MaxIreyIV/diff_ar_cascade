@@ -1,31 +1,31 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
 from utils.generate import generate
 import torch
-device = "cuda:1" if torch.cuda.is_available() else "cpu"
+device = "cuda:3" if torch.cuda.is_available() else "cpu"
 
 # Load Dream
 dream_checkpoint = "Dream-org/Dream-v0-Instruct-7B"
 dream_tokenizer = AutoTokenizer.from_pretrained(dream_checkpoint, trust_remote_code=True)
-dream_model = (
-    AutoModel.from_pretrained(
+dream_model = AutoModel.from_pretrained(
         dream_checkpoint,
         trust_remote_code=True,
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
         device_map={"": 1}
-    )
-    .eval()
-)
+).eval()
 
 # Load DeepSeek
-ds_checkpoint = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+ds_checkpoint = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 ds_tokenizer = AutoTokenizer.from_pretrained(
     ds_checkpoint,
     trust_remote_code=True
 )
 ds_model = AutoModelForCausalLM.from_pretrained(
     ds_checkpoint,
-    torch_dtype=torch.float16).to(device)
+    torch_dtype=torch.float16,
+    low_cpu_mem_usage=True,
+    device_map={"": 3}
+)
 
 # Run Dream
 def run_dream(question: str, max_new_tokens: int = 256, steps: int = 256) -> str:
@@ -90,7 +90,7 @@ def run_deepseek(prompt: str, max_new_tokens: int = 512) -> str:
     content = ds_tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip("\n")
     return thinking_content, content
 
-question = "What is 2 + 2?"
-rest = run_deepseek(question)
-print("thinking_content: ", rest[0])
-print("content: ", rest[1])
+question = "What is 5 times 6?"
+ret = run_deepseek(question, max_new_tokens=256)
+print('Thoughts:', ret[0])
+print('Answer:', ret[1])
